@@ -1,0 +1,5 @@
+# 0 for the first 10%, linear 0 -> 1 through 40%, then 1.
+start_scale: 0.0
+end_scale: 1.0
+ramp_start: 0.1
+ramp_end: 0.4

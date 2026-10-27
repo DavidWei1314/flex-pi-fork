@@ -1,0 +1,5 @@
+# Matches the ramp's continuous-time mean coefficient (not gradient integral).
+start_scale: 0.75
+end_scale: 0.75
+ramp_start: 0.0
+ramp_end: 1.0

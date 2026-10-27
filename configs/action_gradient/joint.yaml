@@ -1,0 +1,5 @@
+# Full gradient baseline, using the same split-query path as every control.
+start_scale: 1.0
+end_scale: 1.0
+ramp_start: 0.0
+ramp_end: 1.0

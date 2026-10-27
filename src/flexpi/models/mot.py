@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Callable, ClassVar, Dict, Optional
 
 import torch
@@ -14,6 +15,19 @@ logger = get_logger(__name__)
 
 # Lazy-initialized compiled flex_attention — only imported/compiled when needed
 _compiled_flex_attn: Callable | None = None
+
+
+def scale_gradient(x: torch.Tensor, scale: float) -> torch.Tensor:
+    """Keep finite forward values unchanged; multiply their backward gradient.
+
+    This must be used on the action reader's private view of visual K/V, never
+    on the K/V used by visual queries themselves.
+    """
+    if scale == 1.0:
+        return x
+    if scale == 0.0:
+        return x.detach()
+    return x.detach() + scale * (x - x.detach())
 
 
 def _get_compiled_flex_attn() -> Callable:
@@ -71,6 +85,9 @@ class MoT(nn.Module):
         self.expert_order = list(self.mixtures.keys())
         self.mot_checkpoint_mixed_attn = mot_checkpoint_mixed_attn
         self.attn_mode = attn_mode
+        # None preserves the original attention path. Explicit controls all use
+        # the same split-query path, including scale=1, for comparable numerics.
+        self.action_gradient_scale: float | None = None
         self.hbridge_enabled = hbridge_enabled
         self.hbridge_bottom_ratio = hbridge_bottom_ratio
         self.hbridge_top_ratio = hbridge_top_ratio
@@ -221,6 +238,34 @@ class MoT(nn.Module):
                 use_reentrant=False,
             )
         return _forward(q_cat, k_cat, v_cat)
+
+    def _attention_with_action_gradient(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        attention_mask: torch.Tensor,
+        video_len: int,
+        scale: float,
+    ) -> torch.Tensor:
+        """Route gradients by query owner, keeping each softmax over all keys.
+
+        Splitting keys into separate attentions and summing would change the
+        forward function. Splitting query rows preserves it (up to attention
+        kernel rounding), while allowing action queries their own K/V graph.
+        """
+        visual_out = self._mixed_attention(
+            q[:, :video_len], k, v, attention_mask[..., :video_len, :],
+        )
+        action_k = torch.cat((scale_gradient(k[:, :video_len], scale),
+                              k[:, video_len:]), dim=1)
+        action_v = torch.cat((scale_gradient(v[:, :video_len], scale),
+                              v[:, video_len:]), dim=1)
+        action_out = self._mixed_attention(
+            q[:, video_len:], action_k, action_v,
+            attention_mask[..., video_len:, :],
+        )
+        return torch.cat((visual_out, action_out), dim=1)
 
     @staticmethod
     def _apply_expert_post_block(
@@ -1051,6 +1096,26 @@ class MoT(nn.Module):
                         f"got shape {tuple(smask.shape)}"
                     )
 
+        # Inference (including cached/compiled inference) keeps its original
+        # path. Capture a scalar once, so checkpoint recomputation uses the
+        # same coefficient even if the trainer later advances the schedule.
+        action_scale = self.action_gradient_scale if self.training and torch.is_grad_enabled() else None
+        if action_scale is not None:
+            if not math.isfinite(action_scale) or not 0.0 <= action_scale <= 1.0:
+                raise ValueError("action_gradient_scale must be finite and in [0, 1]")
+            if self.expert_order != ["video", "action"]:
+                raise ValueError("Action gradient routing requires expert order ['video', 'action']")
+            if attention_mask is None or attention_mask.dtype != torch.bool:
+                raise ValueError("Action gradient routing requires an explicit boolean attention mask")
+            video_len = embeds_all["video"].shape[1]
+            if attention_mask[..., :video_len, video_len:].any().item():
+                raise ValueError("Action gradient routing requires visual queries not to read actions")
+            if hbridge_active:
+                # Outer masks must also keep the action stream separate. A
+                # malformed HBridge partition would otherwise bypass routing.
+                if sum(sub_stream_lens[:-1]) != video_len or sub_stream_lens[-1] != embeds_all["action"].shape[1]:
+                    raise ValueError("HBridge must partition visual streams followed by the action stream")
+
         tokens_all = {k: v for k, v in embeds_all.items()}
 
         for layer_idx in range(self.num_layers):
@@ -1129,6 +1194,10 @@ class MoT(nn.Module):
                     )
                     offset += sub_len
                 mixed = torch.cat(mixed_chunks, dim=1)
+            elif action_scale is not None:
+                mixed = self._attention_with_action_gradient(
+                    q_cat, k_cat, v_cat, attention_mask, seq_lens[0], action_scale,
+                )
             else:
                 mixed = self._mixed_attention(q_cat=q_cat, k_cat=k_cat, v_cat=v_cat, attention_mask=attention_mask)
 

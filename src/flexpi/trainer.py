@@ -18,6 +18,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 
 from .utils.fs import ensure_dir
+from .utils.action_gradient import ActionGradientSchedule
 from .utils.logging_config import get_logger
 from .utils.pytorch_utils import set_global_seed
 from .utils.samplers import ResumableEpochSampler, WeightedResumableEpochSampler
@@ -124,6 +125,13 @@ class Wan22Trainer:
         self.train_loader = self._build_loader(self.train_dataset, worker_init_fn=worker_init_fn)
         total_train_steps = self._estimate_total_train_steps()
         self.max_steps = total_train_steps
+        gradient_cfg = cfg.get("action_gradient")
+        self.action_gradient_schedule = (
+            ActionGradientSchedule(total_steps=total_train_steps, **dict(gradient_cfg))
+            if gradient_cfg is not None else None
+        )
+        if self.action_gradient_schedule is not None and not hasattr(self.model, "mot"):
+            raise ValueError("action_gradient requires a model with a MoT backbone")
         warmup_steps = int(total_train_steps * 0.05)
         self.scheduler = self._build_scheduler(
             total_train_steps=total_train_steps,
@@ -1361,6 +1369,10 @@ class Wan22Trainer:
             "global_step": int(self.global_step),
             "epoch": int(self.epoch),
             "batch_in_epoch": int(self.batch_in_epoch),
+            "action_gradient_schedule": (
+                self.action_gradient_schedule.state_dict()
+                if self.action_gradient_schedule is not None else None
+            ),
         }
         with open(state_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=True, indent=2)
@@ -1456,8 +1468,17 @@ class Wan22Trainer:
                 pass
 
     def load_training_state(self, state_dir: str):
-        self.accelerator.load_state(input_dir=state_dir)
         state_file = Path(state_dir) / "trainer_state.json"
+        # Check the treatment before restoring large optimizer/model states.
+        saved_gradient_schedule = None
+        if state_file.exists():
+            with open(state_file, "r", encoding="utf-8") as f:
+                saved_gradient_schedule = json.load(f).get("action_gradient_schedule")
+        if self.action_gradient_schedule is not None:
+            self.action_gradient_schedule.validate_resume(saved_gradient_schedule)
+        elif saved_gradient_schedule is not None:
+            raise ValueError("Resume must retain the saved action_gradient configuration")
+        self.accelerator.load_state(input_dir=state_dir)
         if state_file.exists():
             with open(state_file, "r", encoding="utf-8") as f:
                 payload = json.load(f)
@@ -1560,16 +1581,23 @@ class Wan22Trainer:
             with self.accelerator.accumulate(self.model):
                 train_model = self.model if hasattr(self.model, "training_loss") else self.accelerator.unwrap_model(self.model)
 
+                action_scale = None
+                if self.action_gradient_schedule is not None:
+                    action_scale = self.action_gradient_schedule.value(self.global_step)
+                    unwrapped_model.mot.action_gradient_scale = action_scale
                 with self.accelerator.autocast():
                     loss, loss_dict = train_model.training_loss(sample)
+                if action_scale is not None:
+                    loss_dict["action_to_visual_grad_scale"] = action_scale
                 self.accelerator.backward(loss)
 
                 if self.accelerator.sync_gradients:
                     grad_norm = self.accelerator.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                     self.optimizer.step()
-                    if not self.accelerator.optimizer_step_was_skipped:
-                        self.scheduler.step()
                     self.optimizer.zero_grad(set_to_none=True)
+                    if self.accelerator.optimizer_step_was_skipped:
+                        continue
+                    self.scheduler.step()
                     self.global_step += 1
                     global_loss = float(
                         self.accelerator.gather(loss.detach().float().reshape(1)).mean().item()

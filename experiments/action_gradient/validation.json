@@ -1,0 +1,33 @@
+{
+  "local_date": "2026-10-26",
+  "branch": "exp/action-gradient-curriculum",
+  "base_commit": "20c1b2b71ea35a415d5d47c39b04443cfadad7a1",
+  "slurm_job": 56063,
+  "slurm_state": "COMPLETED",
+  "slurm_exit_code": "0:0",
+  "site": "bom",
+  "node": "bom-0006",
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "gpu_count": 1,
+  "environment_on_bom": "/site/anjiangwei/wam-envs/flex-pi/.venv",
+  "python": "3.11.17",
+  "torch": "2.7.1+cu128",
+  "pytest": {
+    "tests": 15,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "test_seconds": 20.89,
+  "source_snapshot": "884f1c074d6a8d1243e34bfd613c41044bb54926",
+  "praxis_run": "run_20261026_1701_dvah03y",
+  "junit_on_bom": "/site/anjiangwei/wam-envs/flex-pi/validation/56063/pytest.xml",
+  "precision": "FP32 algebra with TF32 disabled; separate bf16/checkpoint test",
+  "warnings": [
+    "Existing trainer torch.tensor(grad_norm) copy-construction warning"
+  ],
+  "limitations": [
+    "Tests use reduced-width actual Wan/ActionDiT blocks, not a full 6B training run.",
+    "Multi-node DeepSpeed, RoboTwin simulator assets, and task success are not validated here."
+  ]
+}

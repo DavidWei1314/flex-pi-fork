@@ -4,6 +4,7 @@ from pathlib import Path
 
 import torch
 from hydra.utils import instantiate
+from accelerate.utils import set_seed
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
@@ -424,6 +425,10 @@ def run_training(cfg: DictConfig):
     model_device = _resolve_train_device()
     mixed_precision = _normalize_mixed_precision(cfg.mixed_precision)
     model_dtype = _mixed_precision_to_model_dtype(mixed_precision)
+    # Randomly initialized heads/adapters must match across ablation conditions
+    # and ranks. The trainer subsequently sets rank-specific sampling seeds.
+    # Seeding only in the trainer is too late: the model already exists then.
+    set_seed(int(cfg.seed), device_specific=False)
     model = instantiate(cfg.model, model_dtype=model_dtype, device=model_device)
     train_ds, val_ds = build_datasets(cfg.data)
 

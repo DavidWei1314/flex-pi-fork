@@ -1,0 +1,5 @@
+# World losses still train the visual trunk; only action-to-visual is stopped.
+start_scale: 0.0
+end_scale: 0.0
+ramp_start: 0.0
+ramp_end: 1.0
