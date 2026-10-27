@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from hydra import compose, initialize_config_dir
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf
 import pytest
 import torch
@@ -220,8 +221,61 @@ def test_hydra_presets():
             assert schedule.value(250) == pytest.approx(expected)
 
 
-def test_real_trainer_accumulation_and_full_state_resume(cuda, tmp_path):
+@pytest.fixture
+def compose_training_config(monkeypatch):
+    """Compose real CLI overrides and expose them to the resume entry point."""
+    hydra_state = HydraConfig.instance()
+    monkeypatch.setattr(hydra_state, "cfg", hydra_state.cfg)
+    config_dir = str(Path(__file__).resolve().parents[1] / "configs")
+
+    def compose_config(overrides):
+        with initialize_config_dir(config_dir=config_dir, version_base=None):
+            full_cfg = compose(config_name="train", overrides=overrides,
+                               return_hydra_config=True)
+        hydra_state.set_config(full_cfg)
+        return OmegaConf.masked_copy(full_cfg, [key for key in full_cfg if key != "hydra"])
+
+    return compose_config
+
+
+@pytest.mark.parametrize("group,leaf_overrides,expected_end", [
+    ("ramp", [], 0.6),
+    ("weak", [], 0.6),
+    ("ramp", ["action_gradient.ramp_end=0.7"], 0.7),
+])
+def test_saved_config_keeps_gradient_group_and_applies_leaves(
+    tmp_path, compose_training_config, group, leaf_overrides, expected_end,
+):
+    from flexpi.runtime import _maybe_swap_with_saved_config
+
+    state_dir = tmp_path / "original/checkpoints/state/step_000002"
+    state_dir.mkdir(parents=True)
+    saved_cfg = compose_training_config([
+        "task=robotwin_unified_flex_3cam_384_1e-4", "action_gradient=ramp",
+        "action_gradient.ramp_end=0.6",
+    ])
+    OmegaConf.save(saved_cfg, tmp_path / "original/config.yaml")
+    launch_cfg = compose_training_config([
+        "task=robotwin_unified_flex_3cam_384_1e-4", f"action_gradient={group}",
+        "resume_config_source=saved_with_overrides", f"resume={state_dir}",
+        f"output_dir={tmp_path / 'resumed'}", "log_every=17", *leaf_overrides,
+    ])
+    restored = _maybe_swap_with_saved_config(launch_cfg)
+    assert OmegaConf.is_dict(restored.action_gradient)
+    assert restored.action_gradient.start_scale == 0.0
+    assert restored.action_gradient.end_scale == 1.0
+    assert restored.action_gradient.ramp_end == expected_end
+    assert restored.log_every == 17
+    assert restored.resume == str(state_dir)
+    assert restored.output_dir == str(tmp_path / "resumed")
+    ActionGradientSchedule(total_steps=1000, **dict(restored.action_gradient))
+
+
+def test_real_trainer_accumulation_and_full_state_resume(
+    cuda, tmp_path, monkeypatch, compose_training_config,
+):
     """Compare resumed training with uninterrupted updates through the ramp."""
+    from flexpi import runtime
     from flexpi.trainer import Wan22Trainer
 
     class TrainingModel(torch.nn.Module):
@@ -240,7 +294,7 @@ def test_real_trainer_accumulation_and_full_state_resume(cuda, tmp_path):
             torch.save({"model": self.state_dict(), "step": step}, path)
 
     cfg = OmegaConf.create(dict(
-        model={}, output_dir=str(tmp_path / "original"), learning_rate=1e-4,
+        model={}, data={}, output_dir=str(tmp_path / "original"), learning_rate=1e-4,
         weight_decay=0.0, batch_size=2, num_workers=0, num_epochs=1,
         max_steps=6, log_every=0, save_every=2, eval_every=0,
         eval_num_inference_steps=1, gradient_accumulation_steps=2,
@@ -251,6 +305,7 @@ def test_real_trainer_accumulation_and_full_state_resume(cuda, tmp_path):
     ))
     model = TrainingModel()
     trainer = Wan22Trainer(model, list(range(64)), cfg=cfg)
+    OmegaConf.save(cfg, tmp_path / "original/config.yaml")
     trainer.train()
     expected = [trainer.action_gradient_schedule.value(step)
                 for step in range(6) for _ in range(2)]
@@ -261,12 +316,28 @@ def test_real_trainer_accumulation_and_full_state_resume(cuda, tmp_path):
     assert saved["action_gradient_schedule"]["total_steps"] == 6
     final_parameters = {name: p.detach().clone() for name, p in model.named_parameters()}
 
-    cfg.output_dir = str(tmp_path / "resumed")
-    cfg.resume = str(state_dir)
+    launch_cfg = compose_training_config([
+        "task=robotwin_unified_flex_3cam_384_1e-4", "action_gradient=ramp",
+        "resume_config_source=saved_with_overrides", f"resume={state_dir}",
+        f"output_dir={tmp_path / 'resumed'}", "log_every=1",
+    ])
     resumed_model = TrainingModel()
-    resumed = Wan22Trainer(resumed_model, list(range(64)), cfg=cfg)
-    assert resumed.global_step == 2
-    resumed.train()
+    resumed_trainers = []
+
+    def construct_trainer(**kwargs):
+        resumed = Wan22Trainer(**kwargs)
+        assert resumed.global_step == 2
+        resumed_trainers.append(resumed)
+        return resumed
+
+    # Substitute only the expensive model/data construction; use the real
+    # run_training -> saved-config merge -> trainer -> checkpoint-load path.
+    monkeypatch.setattr(runtime, "instantiate", lambda *args, **kwargs: resumed_model)
+    monkeypatch.setattr(runtime, "build_datasets", lambda data_cfg: (list(range(64)), None))
+    monkeypatch.setattr(runtime, "Wan22Trainer", construct_trainer)
+    runtime.run_training(launch_cfg)
+    assert resumed_trainers[0].global_step == 6
+    assert resumed_trainers[0].log_every == 1
     assert resumed_model.seen_scales == expected[4:]
     for name, parameter in resumed_model.named_parameters():
         torch.testing.assert_close(parameter, final_parameters[name], rtol=0, atol=0)

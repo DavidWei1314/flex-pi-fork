@@ -307,7 +307,7 @@ def _maybe_swap_with_saved_config(cfg: DictConfig) -> DictConfig:
         reproducing phase-1 exactly.
       - "saved_with_overrides": "saved" + apply current Hydra CLI leaf overrides
         on top (e.g. num_epochs=30). Group overrides (data=..., model=...,
-        task=...) are skipped — they don't apply as leaf merges.
+        task=..., action_gradient=...) are skipped — they don't apply as leaf merges.
 
     The run_dir is inferred from `cfg.resume`: both
     `runs/.../checkpoints/state/step_NNNNNN` and
@@ -369,11 +369,11 @@ def _maybe_swap_with_saved_config(cfg: DictConfig) -> DictConfig:
             cli_overrides = []
         # Skip:
         #   - meta-control flags that don't belong in cfg
-        #   - Hydra group overrides (data=..., model=..., task=...) — these
+        #   - Hydra group overrides (including action_gradient=...) — these
         #     would clobber the corresponding subtree as a string leaf, not
         #     re-trigger Hydra's group-config loading.
         _SKIP_LEAF = ("resume_config_source",)
-        _SKIP_GROUP = ("data", "model", "task")
+        _SKIP_GROUP = ("data", "model", "task", "action_gradient")
         kept = []
         for ov in cli_overrides:
             stripped = ov.lstrip("+")
