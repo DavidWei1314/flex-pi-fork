@@ -1,0 +1,60 @@
+{
+  "submitted_at_pacific": "2026-10-26 18:57:18",
+  "branch": "exp/action-gradient-curriculum",
+  "code_commit": "b14c6f9",
+  "p2_fix_commit": "6ead87d",
+  "site": "bom",
+  "credentials": "Runtime-only private file or WANDB_API_KEY; not included in source snapshots.",
+  "jobs": {
+    "dataset_download": {
+      "job_id": 56071,
+      "qos": "annotate-100",
+      "gpus": 0
+    },
+    "initial_weights": {
+      "job_id": 56072,
+      "state": "COMPLETED"
+    },
+    "probe_text": {
+      "job_id": 56073,
+      "state": "COMPLETED"
+    },
+    "regression_tests": {
+      "job_id": 56074,
+      "state": "COMPLETED",
+      "tests_passed": 19
+    },
+    "full_model_preflight": {
+      "job_id": 56075,
+      "state": "COMPLETED",
+      "nodes": 2,
+      "gpus_per_node": 8
+    },
+    "full_text_cache": {
+      "job_id": 56076,
+      "depends_on": [
+        56071
+      ],
+      "gpus": 8
+    },
+    "training": {
+      "job_id": 56077,
+      "array": "0-11%4",
+      "depends_on": [
+        56075,
+        56076
+      ],
+      "nodes_per_run": 2,
+      "gpus_per_node": 8,
+      "qos": "normal",
+      "max_gpus_total": 64,
+      "praxis_run": "run_20261026_1857_cs178xq",
+      "source_snapshot": "f9e99c6148b971329b07be886ab07873f6a26cec",
+      "records": "/workspace/anjiangwei/.praxis-runs/runs/2026-10-26_flexpi-curriculum-train_cs178xq/attempt-001"
+    }
+  },
+  "wandb_project": "https://wandb.ai/praxis-intelligence/flex-pi",
+  "preflight_run": "https://wandb.ai/praxis-intelligence/flex-pi/runs/probe-ramp-seed42-56075-0",
+  "training_group": "action-gradient-curriculum",
+  "evaluation_status": "Not launched. Training jobs set eval_every=0. Define and record paired simulator test seeds before reporting task success."
+}
