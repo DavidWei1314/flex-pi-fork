@@ -99,3 +99,39 @@ unseen/OOD. Keep full-joint and action-only evaluation settings fixed and report
 them separately. World prediction metrics are diagnostics, not control success.
 First compare the four alpha schedules; only then study reducing beta, since that
 is a separate intervention. Novelty is not a prerequisite for this experiment.
+
+BOM full-model launch
+---------------------
+submit_cluster.sh captures src/configs/scripts and this experiment directory,
+then submits exclusively through praxis sbatch. cluster.sbatch rejects sites
+other than BOM/UNI and uses the shared Docker/torchrun launcher for InfiniBand.
+The prepared environment and data currently live at BOM; UNI needs its own copy.
+
+Stages: prepare (CPU download/dependencies), weights (one GPU, ActionDiT initial
+weights and DINO cache), text-probe / text-train (GPU T5 caches), probe / train.
+Use Slurm afterok dependencies between stages. Probe is the SAME full model on
+50 training episodes, with 12 optimizer updates; it is not a held-out evaluation.
+The formal subset has 100 demos/task, 50 tasks, selection seed 42, fixed HF
+revision bee164afe94041d8c3d7dd1203725c41163fc3f4. All 5,000 selected episode IDs
+are persisted in a manifest. RGB and x264rgb depth are downloaded; the redundant
+FFV1 depth representation is unused. Text caching scans actual parquet task_index
+values (these can vary within an episode), preserving the default language loader.
+
+Formal config: 2 nodes x 8 H100, per-rank batch 4, accumulation 8 (global 512),
+6 epochs, bf16, ZeRO-1, activation checkpointing on for all four conditions.
+Array indices 0..11 map to joint/detached/ramp/weak for seeds 42, then 43, then 44.
+Cap concurrency at 4 (%4) for 64 GPUs. eval_every=0: no closed-loop evaluation
+is performed by these training jobs. Report success only after separate simulator
+rollouts with recorded, paired seeds; do not interpret probe or training loss as
+test performance. Simulator setup and a frozen evaluation manifest remain pending.
+
+Outputs/checkpoints: /site/$USER/flexpi-action-gradient/<condition-seed-job>.
+Online W&B: praxis-intelligence/flex-pi; group action-gradient-curriculum, with
+preflight in a separate group. W&B's local writes go to /data, honoring WANDB_DIR.
+The credential is read at runtime from the owner's private file, never captured
+in source, arguments, configs, or logs. WANDB_API_KEY may alternatively be supplied
+in the environment. Every run records resolved configuration and parameter counts.
+The shared /site/models directory is read-only for this account; existing Wan/T5/
+VAE weights are reused there and new prerequisites go under the writable named
+dataset directory /site/datasets/flex-pi/pretrained. FFmpeg 7 native libraries
+live in the uv environment's sibling media directory, separate from Python deps.

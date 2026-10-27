@@ -1,8 +1,8 @@
 {
   "local_date": "2026-10-26",
   "branch": "exp/action-gradient-curriculum",
-  "base_commit": "73d6f7ce7ad633802701c3e537ccb9f8a4d64830",
-  "slurm_job": 56066,
+  "base_commit": "6ead87d",
+  "slurm_job": 56074,
   "slurm_state": "COMPLETED",
   "slurm_exit_code": "0:0",
   "site": "bom",
@@ -13,15 +13,15 @@
   "python": "3.11.17",
   "torch": "2.7.1+cu128",
   "pytest": {
-    "tests": 18,
+    "tests": 19,
     "failures": 0,
     "errors": 0,
     "skipped": 0
   },
-  "test_seconds": 17.31,
-  "source_snapshot": "f053f7644ca63a50447b7ee27d188c6bdbad337a",
-  "praxis_run": "run_20261026_1817_mgkx4ka",
-  "junit_on_bom": "/site/anjiangwei/wam-envs/flex-pi/validation/56066/pytest.xml",
+  "test_seconds": 17.75,
+  "source_snapshot": "8e48218d87f5b8ed601677a84e5c36064f95bc09",
+  "praxis_run": "run_20261026_1842_ansh9tx",
+  "junit_on_bom": "/site/anjiangwei/wam-envs/flex-pi/validation/56074/pytest.xml",
   "precision": "FP32 algebra with TF32 disabled; separate bf16/checkpoint test",
   "warnings": [
     "Existing trainer torch.tensor(grad_norm) copy-construction warning"
@@ -30,5 +30,6 @@
     "Tests use reduced-width actual Wan/ActionDiT blocks, not a full 6B training run.",
     "Multi-node DeepSpeed, RoboTwin simulator assets, and task success are not validated here."
   ],
-  "resume_coverage": "Real Hydra group and leaf overrides through run_training, saved-config merge, trainer creation, full checkpoint restore, and resumed CUDA updates."
+  "resume_coverage": "Real Hydra group and leaf overrides through run_training, saved-config merge, trainer creation, full checkpoint restore, and resumed CUDA updates.",
+  "wandb_coverage": "Main-rank-only initialization, WANDB_DIR, resolved experiment config, run ID, and parameter/global batch metadata."
 }

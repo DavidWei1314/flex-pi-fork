@@ -120,6 +120,11 @@ class Wan22Trainer:
         # _apply_dit_only_train_mode unfreezes dit + any model-specific trainable layers.
         self._apply_dit_only_train_mode(self.model)
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        self.parameter_counts = {
+            "total": sum(p.numel() for p in self.model.parameters()),
+            "trainable": sum(p.numel() for p in trainable_params),
+        }
+        logger.info("Model parameters: %s", self.parameter_counts)
         self.optimizer = self._build_optimizer(trainable_params)
         
         self.train_loader = self._build_loader(self.train_dataset, worker_init_fn=worker_init_fn)
@@ -192,20 +197,36 @@ class Wan22Trainer:
                 "wandb logging is enabled in config (`wandb.enabled=true`) but wandb is not installed."
             ) from e
 
+        wandb_dir = os.environ.get("WANDB_DIR", self.output_dir)
+        ensure_dir(wandb_dir)
+        run_id = self.cfg.wandb.get("id")
         self.wandb_run = wandb.init(
             entity=self.cfg.wandb.workspace,
             project=self.cfg.wandb.project,
             name=self.cfg.wandb.name,
             group=None if self.cfg.wandb.group in (None, "null", "") else str(self.cfg.wandb.group),
             mode=self.cfg.wandb.mode,
-            dir=self.output_dir,
+            dir=wandb_dir,
+            id=run_id,
+            resume="allow" if run_id else None,
+            config=OmegaConf.to_container(self.cfg, resolve=True),
         )
+        self.wandb_run.summary["parameters"] = self.parameter_counts
+        self.wandb_run.summary["world_size"] = self.accelerator.num_processes
+        self.wandb_run.summary["effective_batch_size"] = (
+            self.batch_size * self.gradient_accumulation_steps * self.accelerator.num_processes
+        )
+        Path(self.output_dir, "wandb_run.json").write_text(json.dumps({
+            "id": self.wandb_run.id, "url": self.wandb_run.url,
+            "parameters": self.parameter_counts,
+        }, indent=2) + "\n")
         logger.info(
             "Initialized wandb run: workspace=%s project=%s name=%s",
             self.cfg.wandb.workspace,
             self.cfg.wandb.project,
             self.cfg.wandb.name,
         )
+        logger.info("W&B URL: %s", self.wandb_run.url)
 
     def _wandb_log(self, payload: dict):
         if self.wandb_run is None:

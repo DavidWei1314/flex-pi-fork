@@ -3,6 +3,8 @@
 from contextlib import nullcontext
 import json
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 from hydra import compose, initialize_config_dir
 from hydra.core.hydra_config import HydraConfig
@@ -370,3 +372,39 @@ def test_training_entry_seeds_random_heads_before_construction(cuda, tmp_path, m
         runtime.run_training(cfg)
     torch.testing.assert_close(initial_weights[0], initial_weights[1], rtol=0, atol=0)
     assert not torch.equal(initial_weights[0], initial_weights[2])
+
+
+def test_wandb_uses_local_directory_and_records_experiment(tmp_path, monkeypatch):
+    from flexpi.trainer import Wan22Trainer
+
+    calls = []
+    run = SimpleNamespace(id="paired-ramp-42", url="https://wandb.ai/test/run", summary={})
+
+    def initialize(**kwargs):
+        calls.append(kwargs)
+        return run
+
+    monkeypatch.setitem(sys.modules, "wandb", SimpleNamespace(init=initialize))
+    local_dir = tmp_path / "local-cache"
+    monkeypatch.setenv("WANDB_DIR", str(local_dir))
+    trainer = object.__new__(Wan22Trainer)
+    trainer.wandb_enabled = True
+    trainer.accelerator = SimpleNamespace(is_main_process=True, num_processes=16)
+    trainer.output_dir = str(tmp_path)
+    trainer.parameter_counts = {"total": 100, "trainable": 90}
+    trainer.batch_size = 4
+    trainer.gradient_accumulation_steps = 8
+    trainer.cfg = OmegaConf.create(dict(
+        seed=42, action_gradient={"start_scale": 0.0, "end_scale": 1.0},
+        wandb=dict(workspace="test", project="flex-pi", name="ramp-42",
+                   group="curriculum", mode="online", id=run.id),
+    ))
+    trainer._init_wandb()
+    assert calls[0]["dir"] == str(local_dir)
+    assert calls[0]["resume"] == "allow"
+    assert calls[0]["config"]["action_gradient"]["start_scale"] == 0.0
+    assert run.summary["effective_batch_size"] == 512
+    assert json.loads((tmp_path / "wandb_run.json").read_text())["url"] == run.url
+    trainer.accelerator.is_main_process = False
+    trainer._init_wandb()
+    assert len(calls) == 1

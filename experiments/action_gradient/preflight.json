@@ -1,0 +1,77 @@
+{
+  "job_id": 56075,
+  "state": "COMPLETED",
+  "exit_code": "0:0",
+  "praxis_run": "run_20261026_1844_h5s4jh5",
+  "source_snapshot": "eca2318ca97259260b85a6306d3729a2a8fd55b3",
+  "nodes": [
+    "bom-0006",
+    "bom-0007"
+  ],
+  "gpus": 16,
+  "gpu_type": "H100 80GB",
+  "parameters": {
+    "total": 6831155114,
+    "trainable": 6040825230
+  },
+  "optimizer": "AdamW / DeepSpeed ZeRO-1",
+  "mixed_precision": "bf16",
+  "micro_batch_per_gpu": 4,
+  "accumulation": 8,
+  "effective_batch": 512,
+  "optimizer_updates": 12,
+  "gradient_scales_observed": [
+    0,
+    0.2222,
+    0.5,
+    0.7778,
+    1
+  ],
+  "wandb_url": "https://wandb.ai/praxis-intelligence/flex-pi/runs/probe-ramp-seed42-56075-0",
+  "wandb_state": "finished",
+  "final_logged_metrics": {
+    "performance/instantaneous_samples_per_sec": 65.24999969838143,
+    "performance/instantaneous_steps_per_sec": 0.12744140566090123,
+    "performance/samples_per_sec": 59.84555097623941,
+    "performance/steps_per_sec": 0.1168858417504676,
+    "train/action_to_visual_grad_scale": 1,
+    "train/grad_norm": 21.313968658447266,
+    "train/loss": 1.5242297649383545,
+    "train/loss_action": 0.5979316830635071,
+    "train/loss_dino": 0.4557411074638366,
+    "train/loss_pointmap": 0.14045102894306183,
+    "train/loss_video": 0.33010590076446533,
+    "train/lr": 1.0000000000000002e-06
+  },
+  "weights_checkpoint": "/site/anjiangwei/flexpi-action-gradient/probe-ramp-seed42-56075-0/checkpoints/weights/step_000012.pt",
+  "full_state_checkpoint": "/site/anjiangwei/flexpi-action-gradient/probe-ramp-seed42-56075-0/checkpoints/state/step_000012",
+  "training_plan": {
+    "tasks": 50,
+    "episodes": 5000,
+    "frames": 1127043,
+    "epochs": 6,
+    "updates_per_run": 13212,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "conditions": [
+      "joint",
+      "detached",
+      "ramp",
+      "weak"
+    ],
+    "max_concurrent_runs": 4,
+    "gpu_cap": 64
+  },
+  "estimated_hours_per_run": [
+    30,
+    40
+  ],
+  "limitations": [
+    "Throughput is measured on a 50-episode training subset, not the complete 5,000-episode working set.",
+    "Checkpoint saving was exercised; a full-size multi-node restore was not tested.",
+    "No simulator task-success evaluation has run; probe is not a held-out test set."
+  ]
+}
